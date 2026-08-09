@@ -66,6 +66,7 @@ typedef struct TaskObj {
     PyObject *task_coro;
     PyObject *task_name;
     PyObject *task_context;
+    PyObject *task_wakeup_cb;
     struct llist_node task_node;
 #ifdef Py_GIL_DISABLED
     // thread id of the thread where this task was created
@@ -2171,6 +2172,19 @@ static  PyMethodDef TaskWakeupDef = {
     NULL
 };
 
+static PyObject *
+task_get_wakeup_cb(TaskObj *task)
+{
+    if (task->task_wakeup_cb == NULL) {
+        task->task_wakeup_cb = PyCFunction_New(&TaskWakeupDef,
+                                               (PyObject *)task);
+        if (task->task_wakeup_cb == NULL) {
+            return NULL;
+        }
+    }
+    return Py_NewRef(task->task_wakeup_cb);
+}
+
 /* ----- Task introspection helpers */
 
 static void
@@ -2393,6 +2407,7 @@ TaskObj_clear(PyObject *op)
     (void)FutureObj_clear(op);
     clear_task_coro(task);
     Py_CLEAR(task->task_context);
+    Py_CLEAR(task->task_wakeup_cb);
     Py_CLEAR(task->task_name);
     Py_CLEAR(task->task_fut_waiter);
     return 0;
@@ -2404,6 +2419,7 @@ TaskObj_traverse(PyObject *op, visitproc visit, void *arg)
     TaskObj *task = (TaskObj*)op;
     Py_VISIT(Py_TYPE(task));
     Py_VISIT(task->task_context);
+    Py_VISIT(task->task_wakeup_cb);
     Py_VISIT(task->task_coro);
     Py_VISIT(task->task_name);
     Py_VISIT(task->task_fut_waiter);
@@ -3215,7 +3231,7 @@ task_step_handle_result_impl(asyncio_state *state, TaskObj *task, PyObject *resu
         fut->fut_blocking = 0;
 
         /* result.add_done_callback(task._wakeup) */
-        wrapper = PyCFunction_New(&TaskWakeupDef, (PyObject *)task);
+        wrapper = task_get_wakeup_cb(task);
         if (wrapper == NULL) {
             goto fail;
         }
@@ -3317,7 +3333,7 @@ task_step_handle_result_impl(asyncio_state *state, TaskObj *task, PyObject *resu
             goto fail;
         }
 
-        wrapper = PyCFunction_New(&TaskWakeupDef, (PyObject *)task);
+        wrapper = task_get_wakeup_cb(task);
         if (wrapper == NULL) {
             goto fail;
         }

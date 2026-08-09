@@ -554,38 +554,32 @@
         case _GUARD_NOS_INT: {
             JitOptRef left;
             left = stack_pointer[-2];
-            if (sym_is_compact_int(left)) {
+            if (sym_matches_type(left, &PyLong_Type)) {
                 ADD_OP(_NOP, 0, 0);
             }
-            else {
-                if (sym_get_type(left) == &PyLong_Type) {
-                    ADD_OP(_GUARD_NOS_OVERFLOWED, 0, 0);
-                }
-                sym_set_compact_int(left);
-            }
+            sym_set_type(left, &PyLong_Type);
             break;
         }
 
         case _GUARD_TOS_INT: {
             JitOptRef value;
             value = stack_pointer[-1];
-            if (sym_is_compact_int(value)) {
+            if (sym_matches_type(value, &PyLong_Type)) {
                 ADD_OP(_NOP, 0, 0);
             }
-            else {
-                if (sym_get_type(value) == &PyLong_Type) {
-                    ADD_OP(_GUARD_TOS_OVERFLOWED, 0, 0);
-                }
-                sym_set_compact_int(value);
-            }
+            sym_set_type(value, &PyLong_Type);
             break;
         }
 
-        case _GUARD_NOS_OVERFLOWED: {
+        case _GUARD_NOS_INT_WIDE: {
             break;
         }
 
-        case _GUARD_TOS_OVERFLOWED: {
+        case _GUARD_TOS_INT_WIDE: {
+            break;
+        }
+
+        case _GUARD_BINARY_OP_SUBTRACT_INT_SHRINK: {
             break;
         }
 
@@ -603,7 +597,7 @@
             else if (PyJitRef_IsUnique(right)) {
                 REPLACE_OP(this_instr, _BINARY_OP_MULTIPLY_INT_INPLACE_RIGHT, 0, 0);
             }
-            res = PyJitRef_MakeUnique(sym_new_compact_int(ctx));
+            res = PyJitRef_MakeUnique(sym_new_type(ctx, &PyLong_Type));
             l = left;
             r = right;
             if (
@@ -622,7 +616,6 @@
                 PyObject *right_o = PyStackRef_AsPyObjectBorrow(right);
                 assert(PyLong_CheckExact(left_o));
                 assert(PyLong_CheckExact(right_o));
-                assert(_PyLong_BothAreCompact((PyLongObject *)left_o, (PyLongObject *)right_o));
                 STAT_INC(BINARY_OP, hit);
                 res_stackref = _PyCompactLong_Multiply((PyLongObject *)left_o, (PyLongObject *)right_o);
                 if (PyStackRef_IsNull(res_stackref )) {
@@ -631,6 +624,9 @@
                 }
                 l_stackref = left;
                 r_stackref = right;
+                if (PyStackRef_IsError(res_stackref )) {
+                    goto error;
+                }
                 /* End of uop copied from bytecodes for constant evaluation */
                 (void)l_stackref;
                 (void)r_stackref;
@@ -674,7 +670,7 @@
             else if (PyJitRef_IsUnique(right)) {
                 REPLACE_OP(this_instr, _BINARY_OP_ADD_INT_INPLACE_RIGHT, 0, 0);
             }
-            res = PyJitRef_MakeUnique(sym_new_compact_int(ctx));
+            res = PyJitRef_MakeUnique(sym_new_type(ctx, &PyLong_Type));
             l = left;
             r = right;
             if (
@@ -693,7 +689,6 @@
                 PyObject *right_o = PyStackRef_AsPyObjectBorrow(right);
                 assert(PyLong_CheckExact(left_o));
                 assert(PyLong_CheckExact(right_o));
-                assert(_PyLong_BothAreCompact((PyLongObject *)left_o, (PyLongObject *)right_o));
                 STAT_INC(BINARY_OP, hit);
                 res_stackref = _PyCompactLong_Add((PyLongObject *)left_o, (PyLongObject *)right_o);
                 if (PyStackRef_IsNull(res_stackref )) {
@@ -702,6 +697,9 @@
                 }
                 l_stackref = left;
                 r_stackref = right;
+                if (PyStackRef_IsError(res_stackref )) {
+                    goto error;
+                }
                 /* End of uop copied from bytecodes for constant evaluation */
                 (void)l_stackref;
                 (void)r_stackref;
@@ -745,7 +743,7 @@
             else if (PyJitRef_IsUnique(right)) {
                 REPLACE_OP(this_instr, _BINARY_OP_SUBTRACT_INT_INPLACE_RIGHT, 0, 0);
             }
-            res = PyJitRef_MakeUnique(sym_new_compact_int(ctx));
+            res = PyJitRef_MakeUnique(sym_new_type(ctx, &PyLong_Type));
             l = left;
             r = right;
             if (
@@ -764,7 +762,6 @@
                 PyObject *right_o = PyStackRef_AsPyObjectBorrow(right);
                 assert(PyLong_CheckExact(left_o));
                 assert(PyLong_CheckExact(right_o));
-                assert(_PyLong_BothAreCompact((PyLongObject *)left_o, (PyLongObject *)right_o));
                 STAT_INC(BINARY_OP, hit);
                 res_stackref = _PyCompactLong_Subtract((PyLongObject *)left_o, (PyLongObject *)right_o);
                 if (PyStackRef_IsNull(res_stackref )) {
@@ -773,6 +770,9 @@
                 }
                 l_stackref = left;
                 r_stackref = right;
+                if (PyStackRef_IsError(res_stackref )) {
+                    goto error;
+                }
                 /* End of uop copied from bytecodes for constant evaluation */
                 (void)l_stackref;
                 (void)r_stackref;
@@ -793,6 +793,96 @@
                 ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
                 break;
             }
+            CHECK_STACK_BOUNDS(1);
+            stack_pointer[-2] = res;
+            stack_pointer[-1] = l;
+            stack_pointer[0] = r;
+            stack_pointer += 1;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            break;
+        }
+
+        case _BINARY_OP_SUBTRACT_INT_WIDE: {
+            JitOptRef right;
+            JitOptRef left;
+            JitOptRef res;
+            JitOptRef l;
+            JitOptRef r;
+            right = stack_pointer[-1];
+            left = stack_pointer[-2];
+            if (PyJitRef_IsUnique(left)) {
+                REPLACE_OP(this_instr, _BINARY_OP_SUBTRACT_INT_WIDE_INPLACE, 0, 0);
+            }
+            else if (PyJitRef_IsUnique(right)) {
+                REPLACE_OP(this_instr, _BINARY_OP_SUBTRACT_INT_WIDE_INPLACE_RIGHT, 0, 0);
+            }
+            res = PyJitRef_MakeUnique(sym_new_type(ctx, &PyLong_Type));
+            l = left;
+            r = right;
+            if (
+                sym_is_safe_const(ctx, left) &&
+                sym_is_safe_const(ctx, right)
+            ) {
+                JitOptRef left_sym = left;
+                JitOptRef right_sym = right;
+                _PyStackRef left = sym_get_const_as_stackref(ctx, left_sym);
+                _PyStackRef right = sym_get_const_as_stackref(ctx, right_sym);
+                _PyStackRef res_stackref;
+                _PyStackRef l_stackref;
+                _PyStackRef r_stackref;
+                /* Start of uop copied from bytecodes for constant evaluation */
+                PyObject *left_o = PyStackRef_AsPyObjectBorrow(left);
+                PyObject *right_o = PyStackRef_AsPyObjectBorrow(right);
+                assert(PyLong_CheckExact(left_o));
+                assert(PyLong_CheckExact(right_o));
+                STAT_INC(BINARY_OP, hit);
+                res_stackref = _PyCompactLong_SubtractWideFast((PyLongObject *)left_o,
+                    (PyLongObject *)right_o);
+                if (PyStackRef_IsNull(res_stackref )) {
+                    ctx->done = true;
+                    break;
+                }
+                l_stackref = left;
+                r_stackref = right;
+                if (PyStackRef_IsError(res_stackref )) {
+                    goto error;
+                }
+                /* End of uop copied from bytecodes for constant evaluation */
+                (void)l_stackref;
+                (void)r_stackref;
+                res = sym_new_const_steal(ctx, PyStackRef_AsPyObjectSteal(res_stackref));
+                if (sym_is_const(ctx, res)) {
+                    PyObject *result = sym_get_const(ctx, res);
+                    if (_Py_IsImmortal(result)) {
+                        // Replace with _LOAD_CONST_INLINE_BORROW + _RROT_3 since we have two inputs and an immortal result
+                        ADD_OP(_LOAD_CONST_INLINE_BORROW, 0, (uintptr_t)result);
+                        ADD_OP(_RROT_3, 0, 0);
+                    }
+                }
+                CHECK_STACK_BOUNDS(1);
+                stack_pointer[-2] = res;
+                stack_pointer[-1] = l;
+                stack_pointer[0] = r;
+                stack_pointer += 1;
+                ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+                break;
+            }
+            CHECK_STACK_BOUNDS(1);
+            stack_pointer[-2] = res;
+            stack_pointer[-1] = l;
+            stack_pointer[0] = r;
+            stack_pointer += 1;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            break;
+        }
+
+        case _BINARY_OP_SUBTRACT_INT_SHRINK: {
+            JitOptRef res;
+            JitOptRef l;
+            JitOptRef r;
+            res = sym_new_not_null(ctx);
+            l = sym_new_not_null(ctx);
+            r = sym_new_not_null(ctx);
             CHECK_STACK_BOUNDS(1);
             stack_pointer[-2] = res;
             stack_pointer[-1] = l;
@@ -867,6 +957,38 @@
         }
 
         case _BINARY_OP_SUBTRACT_INT_INPLACE_RIGHT: {
+            JitOptRef res;
+            JitOptRef l;
+            JitOptRef r;
+            res = sym_new_not_null(ctx);
+            l = sym_new_not_null(ctx);
+            r = sym_new_not_null(ctx);
+            CHECK_STACK_BOUNDS(1);
+            stack_pointer[-2] = res;
+            stack_pointer[-1] = l;
+            stack_pointer[0] = r;
+            stack_pointer += 1;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            break;
+        }
+
+        case _BINARY_OP_SUBTRACT_INT_WIDE_INPLACE: {
+            JitOptRef res;
+            JitOptRef l;
+            JitOptRef r;
+            res = sym_new_not_null(ctx);
+            l = sym_new_not_null(ctx);
+            r = sym_new_not_null(ctx);
+            CHECK_STACK_BOUNDS(1);
+            stack_pointer[-2] = res;
+            stack_pointer[-1] = l;
+            stack_pointer[0] = r;
+            stack_pointer += 1;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            break;
+        }
+
+        case _BINARY_OP_SUBTRACT_INT_WIDE_INPLACE_RIGHT: {
             JitOptRef res;
             JitOptRef l;
             JitOptRef r;
@@ -1430,9 +1552,11 @@
             if (sym_is_const(ctx, sub_st)) {
                 assert(PyLong_CheckExact(sym_get_const(ctx, sub_st)));
                 long index = PyLong_AsLong(sym_get_const(ctx, sub_st));
-                assert(index >= 0);
                 Py_ssize_t tuple_length = sym_tuple_length(tuple_st);
-                if (tuple_length != -1 && index < tuple_length) {
+                if (tuple_length != -1 && index < 0) {
+                    index += tuple_length;
+                }
+                if (tuple_length != -1 && 0 <= index && index < tuple_length) {
                     ADD_OP(_NOP, 0, 0);
                 }
             }
@@ -1451,13 +1575,16 @@
             if (sym_is_const(ctx, sub_st)) {
                 assert(PyLong_CheckExact(sym_get_const(ctx, sub_st)));
                 long index = PyLong_AsLong(sym_get_const(ctx, sub_st));
-                assert(index >= 0);
                 Py_ssize_t tuple_length = sym_tuple_length(tuple_st);
                 if (tuple_length == -1) {
                     res = sym_new_not_null(ctx);
                 }
                 else {
+                    if (index < 0) {
+                        index += tuple_length;
+                    }
                     assert(index < tuple_length);
+                    assert(index >= 0);
                     res = sym_tuple_getitem(ctx, tuple_st, index);
                 }
             }
@@ -1716,6 +1843,10 @@
             CHECK_STACK_BOUNDS(-3);
             stack_pointer += -3;
             ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            break;
+        }
+
+        case _GUARD_TOS_NON_NEGATIVE_COMPACT_INT: {
             break;
         }
 
@@ -3048,13 +3179,15 @@
                 /* Start of uop copied from bytecodes for constant evaluation */
                 PyObject *left_o = PyStackRef_AsPyObjectBorrow(left);
                 PyObject *right_o = PyStackRef_AsPyObjectBorrow(right);
-                assert(_PyLong_IsCompact((PyLongObject *)left_o));
-                assert(_PyLong_IsCompact((PyLongObject *)right_o));
                 STAT_INC(COMPARE_OP, hit);
-                assert(_PyLong_DigitCount((PyLongObject *)left_o) <= 1 &&
-                   _PyLong_DigitCount((PyLongObject *)right_o) <= 1);
-                Py_ssize_t ileft = _PyLong_CompactValue((PyLongObject *)left_o);
-                Py_ssize_t iright = _PyLong_CompactValue((PyLongObject *)right_o);
+                int64_t ileft;
+                int64_t iright;
+                int ok = _PyLong_TryAsInt64Exact((PyLongObject *)left_o, &ileft)
+                && _PyLong_TryAsInt64Exact((PyLongObject *)right_o, &iright);
+                if (!ok) {
+                    ctx->done = true;
+                    break;
+                }
                 int sign_ish = COMPARISON_BIT(ileft, iright);
                 l_stackref = left;
                 r_stackref = right;

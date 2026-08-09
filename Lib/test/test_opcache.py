@@ -1375,7 +1375,7 @@ class TestSpecializer(TestBase):
         self.assert_specialized(binary_op_add_int, "BINARY_OP_ADD_INT")
         self.assert_no_opcode(binary_op_add_int, "BINARY_OP")
 
-        def binary_op_int_non_compact():
+        def binary_op_int_non_compact_int64():
             for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
                 a, b = 10000000000, 1
                 c = a + b
@@ -1384,11 +1384,56 @@ class TestSpecializer(TestBase):
                 self.assertEqual(c, 9999999999)
                 c = a * b
                 self.assertEqual(c, 10000000000)
+                a, b = 1 << 62, 1 << 61
+                c = a - b
+                self.assertEqual(c, 1 << 61)
 
-        binary_op_int_non_compact()
-        self.assert_no_opcode(binary_op_int_non_compact, "BINARY_OP_ADD_INT")
-        self.assert_no_opcode(binary_op_int_non_compact, "BINARY_OP_SUBTRACT_INT")
-        self.assert_no_opcode(binary_op_int_non_compact, "BINARY_OP_MULTIPLY_INT")
+        binary_op_int_non_compact_int64()
+        self.assert_specialized(binary_op_int_non_compact_int64, "BINARY_OP_ADD_INT")
+        self.assert_specialized(binary_op_int_non_compact_int64, "BINARY_OP_SUBTRACT_INT_WIDE")
+        self.assert_specialized(binary_op_int_non_compact_int64, "BINARY_OP_MULTIPLY_INT")
+
+        def binary_op_int_shrinking_wide_subtract():
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                a, b = 10000000001, 10000000000
+                c = a - b
+                self.assertEqual(c, 1)
+
+        binary_op_int_shrinking_wide_subtract()
+        self.assert_specialized(
+            binary_op_int_shrinking_wide_subtract,
+            "BINARY_OP_SUBTRACT_INT_SHRINK",
+        )
+
+        def binary_op_int_too_large():
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                a, b = 1 << 200, 1
+                c = a + b
+                self.assertEqual(c, (1 << 200) + 1)
+                c = a - b
+                self.assertEqual(c, (1 << 200) - 1)
+                c = a * b
+                self.assertEqual(c, 1 << 200)
+
+        binary_op_int_too_large()
+        self.assert_no_opcode(binary_op_int_too_large, "BINARY_OP_ADD_INT")
+        self.assert_no_opcode(binary_op_int_too_large, "BINARY_OP_SUBTRACT_INT")
+        self.assert_no_opcode(binary_op_int_too_large, "BINARY_OP_MULTIPLY_INT")
+
+        def binary_op_int_max_digits_too_large():
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                a, b = 1 << 64, 1
+                c = a + b
+                self.assertEqual(c, (1 << 64) + 1)
+                c = a - b
+                self.assertEqual(c, (1 << 64) - 1)
+                c = a * b
+                self.assertEqual(c, 1 << 64)
+
+        binary_op_int_max_digits_too_large()
+        self.assert_no_opcode(binary_op_int_max_digits_too_large, "BINARY_OP_ADD_INT")
+        self.assert_no_opcode(binary_op_int_max_digits_too_large, "BINARY_OP_SUBTRACT_INT")
+        self.assert_no_opcode(binary_op_int_max_digits_too_large, "BINARY_OP_MULTIPLY_INT")
 
         def binary_op_add_unicode():
             for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
@@ -1890,6 +1935,17 @@ class TestSpecializer(TestBase):
                                 "BINARY_OP_SUBSCR_TUPLE_INT")
         self.assert_no_opcode(binary_subscr_tuple_int, "BINARY_OP")
 
+        def binary_subscr_tuple_negative_int():
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                a = (1, 2, 3)
+                idx = -1
+                self.assertEqual(a[idx], 3)
+
+        binary_subscr_tuple_negative_int()
+        self.assert_specialized(binary_subscr_tuple_negative_int,
+                                "BINARY_OP_SUBSCR_TUPLE_INT")
+        self.assert_no_opcode(binary_subscr_tuple_negative_int, "BINARY_OP")
+
         def binary_subscr_dict():
             for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
                 a = {1: 2, 2: 3}
@@ -1967,6 +2023,16 @@ class TestSpecializer(TestBase):
         self.assert_specialized(binary_subscr_str_int, "BINARY_OP_SUBSCR_STR_INT")
         self.assert_no_opcode(binary_subscr_str_int, "BINARY_OP")
 
+        def binary_subscr_str_negative_int():
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                a = "foobar"
+                idx = -1
+                self.assertEqual(a[idx], "r")
+
+        binary_subscr_str_negative_int()
+        self.assert_specialized(binary_subscr_str_negative_int, "BINARY_OP_SUBSCR_STR_INT")
+        self.assert_no_opcode(binary_subscr_str_negative_int, "BINARY_OP")
+
         def binary_subscr_str_int_non_compact():
             for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
                 a = "바이트코드_특수화"
@@ -1976,6 +2042,16 @@ class TestSpecializer(TestBase):
         binary_subscr_str_int_non_compact()
         self.assert_specialized(binary_subscr_str_int_non_compact, "BINARY_OP_SUBSCR_USTR_INT")
         self.assert_no_opcode(binary_subscr_str_int_non_compact, "BINARY_OP_SUBSCR_STR_INT")
+
+        def binary_subscr_str_negative_int_non_compact():
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                a = "바이트코드_특수화"
+                idx = -1
+                self.assertEqual(a[idx], "화")
+
+        binary_subscr_str_negative_int_non_compact()
+        self.assert_specialized(binary_subscr_str_negative_int_non_compact, "BINARY_OP_SUBSCR_USTR_INT")
+        self.assert_no_opcode(binary_subscr_str_negative_int_non_compact, "BINARY_OP_SUBSCR_STR_INT")
 
         def binary_subscr_getitems():
             class C:
@@ -2025,6 +2101,17 @@ class TestSpecializer(TestBase):
         store_subscr_defaultdict()
         self.assert_specialized(store_subscr_defaultdict, "STORE_SUBSCR_DICT")
         self.assert_no_opcode(store_subscr_defaultdict, "STORE_SUBSCR")
+
+        def store_subscr_list_negative_int():
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                a = [1, 2, 3]
+                idx = -1
+                a[idx] = 4
+                self.assertEqual(a, [1, 2, 4])
+
+        store_subscr_list_negative_int()
+        self.assert_specialized(store_subscr_list_negative_int, "STORE_SUBSCR_LIST_INT")
+        self.assert_no_opcode(store_subscr_list_negative_int, "STORE_SUBSCR")
 
         def store_subscr_dict_subclass_override():
             class MyDict(dict):

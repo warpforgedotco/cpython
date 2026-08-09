@@ -174,11 +174,13 @@ class Future:
         The callbacks are scheduled to be called as soon as possible. Also
         clears the callback list.
         """
-        callbacks = self._callbacks[:]
+        callbacks = self._callbacks
         if not callbacks:
             return
 
-        self._callbacks[:] = []
+        # Transfer ownership so callbacks added while scheduling are kept for
+        # the next completion cycle, without copying the existing list.
+        self._callbacks = []
         for callback, ctx in callbacks:
             self._loop.call_soon(callback, self, context=ctx)
 
